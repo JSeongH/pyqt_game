@@ -4,13 +4,13 @@ from PyQt5.QtGui import *
 from PyQt5 import QtCore, uic, QtGui
 import sys
 
-import CreateObject
-import Setting
+import unit
+import map
 
 
 
 
-gui = uic.loadUiType("PyQt_Project/test.ui")[0]
+gui = uic.loadUiType("test.ui")[0]
 
 
 class Main(QMainWindow, gui):
@@ -18,9 +18,16 @@ class Main(QMainWindow, gui):
         super().__init__()
         self.setupUi(self)
         self.setWindowTitle("Hello, User")
-        map_path = "PyQt_Project/MapData/maze.png"
+        map_path = "MapData/maze.png"
+
+        self.size = 20
+
+        self.isUnit = False
         
-        self.set = Setting.Operation(self)
+        self.set = unit.Operation(self)
+
+        self.map = map.MapData(self.label, map_path)
+        self.map.mapLoading()
         
 
     def redraw(self, rect):
@@ -29,11 +36,23 @@ class Main(QMainWindow, gui):
         self.update(rect.toAlignedRect())
         
         
-    def paintEvent(self, e):
-        painter = QPainter()
-        painter.begin(self.label)
-        self.set.draw(painter)
+    def draw(self):
+        pixmap = QPixmap(self.label.size())  # QLabel 크기에 맞는 QPixmap 생성
+        pixmap.fill(Qt.transparent)  # 투명 배경
+        painter = QPainter(pixmap)
+
+        if self.isUnit == False:
+            coord = QPointF(self.x, self.y)
+            sizes = QSizeF(self.size, self.size)
+            self.user = unit.User(QRectF(coord, sizes), QColor(0, 255, 0))
+            self.isUnit = True
+
+        brush = QBrush(self.user.color)
+        painter.setBrush(brush)
+        painter.drawRect(self.user.rect)
+
         painter.end()
+        self.label.setPixmap(pixmap)  # QPixmap을 QLabel에 설정
         
         
     def keyPressEvent(self, e):
@@ -49,14 +68,29 @@ class Main(QMainWindow, gui):
     def keyReleaseEvent(self, e):
         if self.set.isStart:
             self.set.keyReleased(e.key())
-    
+
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and self.set.isStart == False:
+            local_pos = self.mapFromGlobal(e.globalPos())  
+            self.x = local_pos.x()  
+            self.y = local_pos.y()
+
+            self.draw()
+        
     
     def closeEvent(self, e):
         self.set.gameEnd()
         
         
     def gameOver(self):
-        print("죽어서 게임이 끝나면 어떻게 할것인가 구현 필요")
+        reply = QMessageBox.question(self, 'Game Over', '게임이 끝났습니다. 다시 시작하시겠습니까?',
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.set.gameStart()  # 다시 시작
+        else:
+            self.close()  # 게임 종료
+
 
 
 
