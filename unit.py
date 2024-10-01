@@ -72,37 +72,4 @@ class Operation(QObject):
     def gameEnd(self):
         self.isStart = False
         
-        
-    def keyPressed(self, key):
-        self.user.keyUpdate(key, True)
-        
-    
-    def keyReleased(self, key):
-        self.user.keyUpdate(key, False)
-        
-        
-    def draw(self, painter=QPainter()):
-        if self.isStart:
-            brush = QBrush(self.user.color)
-            painter.setBrush(brush)
-            painter.drawRect(self.user.rect)
-        else:
-            coord = QPointF(self.x, self.y)
-            sizes = QSizeF(self.size, self.size)
-            self.user = User(QRectF(coord, sizes), QColor(0, 255, 0))
             
-            
-    def update(self):
-        self.update_widget.emit(self.user.rect)
-    
-
-    def theard(self):
-        while self.isStart:
-            self.user.moveUpdate()
-            self.update()
-            
-            if self.user.isCollided:
-                self.game_over.emit()
-                break
-            
-            time.sleep(0.01)
