@@ -1,145 +1,145 @@
+from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
 from PyQt5.QtGui import *
-from PyQt5 import QtCore, uic, QtGui
+from PyQt5.QtCore import  *
+from PyQt5 import uic
 from threading import Thread
-import sys
 import time
-
-import unit
-import map
-
-## start 버튼 혹은 키입력 받아서 움직여보기 
-## 움직이는게 통과되면 상호작용이 가능하게 맵을 그려보기
-## 이후 충돌여부에 따라 게임 상태 변화
-## 조이스틱으로 움직이는 기능 추가 
+import sys
+import cv2
 
 
+
+ 
 
 gui = uic.loadUiType("test.ui")[0]
 
 
-class Main(QMainWindow, gui):
-    update_widget = pyqtSignal(QRectF)
-    game_over = pyqtSignal()
+class Unit():
+    def __init__(self, rect=QRectF(), color=QColor()):
+        self.rect = rect
+        self.color = color
 
+        self.direction = [False, False, False, False]
+
+    
+    def keyUpdate(self, key, isPress=True):
+        if key == Qt.Key_Left:
+            self.direction[0] = isPress
+        if key == Qt.Key_Up:
+            self.direction[1] = isPress
+        if key == Qt.Key_Right:
+            self.direction[2] = isPress
+        if key == Qt.Key_Down:
+            self.direction[3] = isPress
+
+
+    def moveUpdate(self, speed=2.0):
+        if self.direction[0]:  # 왼쪽
+            self.rect.adjust(-speed, 0, -speed, 0)
+        if self.direction[1]:  # 위
+            self.rect.adjust(0, -speed, 0, -speed)
+        if self.direction[2]:  # 오른쪽
+            self.rect.adjust(speed, 0, speed, 0)
+        if self.direction[3]:  # 아래
+            self.rect.adjust(0, speed, 0, speed)
+
+
+
+class MyWindow(QMainWindow, gui):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-        self.setWindowTitle("Hello, User")
-        map_path = "MapData/maze.png"
         self.isStart = False
+        self.isCollid = False
+        self.unit = None
 
-        self.size = 20
+        self.boundary = self.label.rect()
+        self.target_color = QColor(255, 255, 255)
 
-        self.isUnit = False
+        self.path = "MapData\maze.png"
+        self.image = cv2.imread(self.path, cv2.IMREAD_GRAYSCALE)
+        _, self.threshold_image = cv2.threshold(self.image, 127, 255, cv2.THRESH_BINARY_INV)
         
-        self.set = unit.Operation(self)
-
-        # self.map = map.MapData(self.label, map_path)
-        # self.map.mapLoading()
-
-        self.update_widget.connect(self.redraw)
-        self.game_over.connect(self.gameOver)
-
-        
-    def draw(self):
-        pixmap = QPixmap(self.label.size())  # QLabel 크기에 맞는 QPixmap 생성
-        pixmap.fill(Qt.transparent)  # 투명 배경
-        painter = QPainter(pixmap)
-
-        if self.set.isStart == False:
-            coord = QPointF(self.x, self.y)
-            sizes = QSizeF(self.size, self.size)
-            self.user = unit.User(QRectF(coord, sizes), QColor(0, 255, 0))
-            self.isUnit = True
-            self.gameStart()
-
-
-        brush = QBrush(self.user.color)
-        painter.setBrush(brush)
-        painter.drawRect(self.user.rect)
-
-        painter.end()
-        self.label.setPixmap(pixmap)  # QPixmap을 QLabel에 설정
-
-
-    def redraw(self, rect):
-        gap = rect.width() * 0.2
-        rect.adjust(-gap, -gap, gap, gap)
-
-        self.draw()
+        pixmap = QPixmap(self.label.size())
+        pixmap.fill(Qt.transparent)
+        self.label.setPixmap(pixmap)
+        self.target_pixmap = self.label.pixmap()
 
 
     def gameStart(self):
-        self.isStart = True
+        if self.unit:
+            self.isStart = True
 
-        self.t = Thread(target=self.theard)
-        self.t.start()
+            self.thread = Thread(target=self.threadFunc)
+            self.thread.start()
+        else:
+            QMessageBox.information(self, '시작에러', '화면을 클릭해 유닛을 생성해주세요.', QMessageBox.Yes)
 
-        
-    def gameEnd(self):
+    
+    def gameStop(self):
         self.isStart = False
 
     
-    def gameOver(self):
-        reply = QMessageBox.question(self, 'Game Over', '게임이 끝났습니다. 다시 시작하시겠습니까?',
-                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.gameStart()  # 다시 시작
-        else:
-            self.close()  # 게임 종료
-        
-        
-    def keyPressEvent(self, e):
-        if self.isStart:
-            self.user.keyUpdate(e.key(), True)
-        else:
-            self.user.keyUpdate(e.key(), True)
-            # 키를 눌렀을 때가아니라 내가 원할때 시작할 수 있는 다른 무언가가 필요
-            # self.set.gameStart()
-            # self.update()
-            
-    
-    def keyReleaseEvent(self, e):
-        if self.isStart:
-            self.user.keyUpdate(e.key(), False)
+    def drawRectAtCoordinates(self, x, y):
+        if self.isStart == False:
+            coord = QPoint(x, y)
+            sizes = QSizeF(20, 20)
+            self.unit = Unit(QRectF(coord, sizes), QColor(0, 255, 0))
+            self.update()
 
+
+    def draw(self, painter):
+        if self.unit:
+            brush = QBrush(self.unit.color)
+            painter.setBrush(brush)
+            painter.drawRect(self.unit.rect)
+
+    
+    def paintEvent(self, e):
+        painter = QPainter(self.target_pixmap)
+        maze_pixmap = QPixmap(self.path)
+        scaled_pixmap = maze_pixmap.scaled(800, 800, Qt.IgnoreAspectRatio)
+        painter.drawPixmap(0, 0, scaled_pixmap)
+        self.draw(painter)
+            
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton and self.set.isStart == False:
+        if e.button() == Qt.LeftButton and self.isStart == False:
             local_pos = self.mapFromGlobal(e.globalPos())  
-            self.x = local_pos.x()  
-            self.y = local_pos.y()
+            x = local_pos.x()
+            y = local_pos.y()
 
-            self.draw()
-        
-    
-    def closeEvent(self, e):
-        self.gameEnd()
-        
-    
-    def update(self):
-        self.update_widget.emit(self.user.rect)
+            self.drawRectAtCoordinates(x, y)
 
 
-    def theard(self):
-        while self.isStart:
-            self.user.moveUpdate()
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.gameStop()
+            self.close()
+        if e.key() == Qt.Key_Space:
+            self.gameStart()
+        if e.key() == Qt.Key_Q:
+            self.gameStop()
+        else:
+            self.unit.keyUpdate(e.key(), True)
             self.update()
+
+    
+    def keyReleaseEvent(self, e):
+        self.unit.keyUpdate(e.key(), False)
             
-            if self.user.isCollided:
-                self.game_over.emit()
-                break
-            
+
+    def threadFunc(self):
+        while self.isStart:
+            self.unit.moveUpdate()
+            self.update()
+
             time.sleep(0.01)
 
-
-
-
-if __name__ == "__main__":
+ 
+if __name__ == '__main__':
     app = QApplication(sys.argv)
-    game = Main()
-    game.show()
-    sys.exit(app.exec())
-    
+    window = MyWindow()
+    window.show()
+    sys.exit(app.exec_())
