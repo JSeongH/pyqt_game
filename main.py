@@ -7,7 +7,7 @@ from threading import Thread
 import time
 import sys
 import cv2
-
+import numpy as np
 
 
  
@@ -51,15 +51,20 @@ class MyWindow(QMainWindow, gui):
         super().__init__()
         self.setupUi(self)
         self.isStart = False
-        self.isCollid = False
         self.unit = None
 
+        self.unit_color = QColor(0, 255, 0)
+        self.unit_size = 20
+        self.start_x = None
+        self.start_y = None
+
         self.boundary = self.label.rect()
-        self.target_color = QColor(255, 255, 255)
+        self.target_color = 255
 
         self.path = "MapData\maze.png"
         self.image = cv2.imread(self.path, cv2.IMREAD_GRAYSCALE)
         _, self.threshold_image = cv2.threshold(self.image, 127, 255, cv2.THRESH_BINARY_INV)
+        self.threshold_image = cv2.resize(self.threshold_image, (800, 800))
         
         pixmap = QPixmap(self.label.size())
         pixmap.fill(Qt.transparent)
@@ -74,18 +79,44 @@ class MyWindow(QMainWindow, gui):
             self.thread = Thread(target=self.threadFunc)
             self.thread.start()
         else:
-            QMessageBox.information(self, '시작에러', '화면을 클릭해 유닛을 생성해주세요.', QMessageBox.Yes)
+            QMessageBox.information(self, '유닛이 없습니다.', '화면을 클릭해 유닛을 생성해주세요.', QMessageBox.Yes)
 
     
     def gameStop(self):
         self.isStart = False
+        
+    
+    def gameOver(self):
+        self.gameStop()
+        reply = QMessageBox.question(self, 'Game Over', '다시하기(Yes) | 게임종료(No)', 
+                             QMessageBox.Yes | QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            self.gameReset()
+        else:
+            QApplication.quit()
+
+    
+    def gameReset(self):
+        self.gameSnapshot()
+
+    
+    def detectWall(self):
+        left = int(self.unit.rect.left())
+        right = int(self.unit.rect.right())
+        top = int(self.unit.rect.top())
+        bottom = int(self.unit.rect.bottom())
+
+        # 슬라이싱을 사용하여 색상 감지
+        if np.any(self.threshold_image[top:bottom, left:right] == self.target_color):
+            self.gameOver()
 
     
     def drawRectAtCoordinates(self, x, y):
         if self.isStart == False:
             coord = QPoint(x, y)
-            sizes = QSizeF(20, 20)
-            self.unit = Unit(QRectF(coord, sizes), QColor(0, 255, 0))
+            sizes = QSizeF(self.unit_size, self.unit_size)
+            self.unit = Unit(QRectF(coord, sizes),self.unit_color)
             self.update()
 
 
@@ -110,32 +141,46 @@ class MyWindow(QMainWindow, gui):
             x = local_pos.x()
             y = local_pos.y()
 
+            self.start_x = x
+            self.start_y = y
+
             self.drawRectAtCoordinates(x, y)
 
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.gameStop()
-            self.close()
-        if e.key() == Qt.Key_Space:
-            self.gameStart()
+            QApplication.quit()
         if e.key() == Qt.Key_Q:
+            self.gameStart()
+        if e.key() == Qt.Key_W:
             self.gameStop()
+        if e.key() == Qt.Key_R:
+            self.gameReset()
         else:
-            self.unit.keyUpdate(e.key(), True)
-            self.update()
+            if self.unit:
+                self.unit.keyUpdate(e.key(), True)
+                self.update()
 
     
     def keyReleaseEvent(self, e):
         self.unit.keyUpdate(e.key(), False)
+
+
+    def gameSnapshot(self):
+        self.drawRectAtCoordinates(self.start_x, self.start_y)
             
 
     def threadFunc(self):
         while self.isStart:
             self.unit.moveUpdate()
+            self.detectWall()
             self.update()
 
             time.sleep(0.01)
+        
+        if self.thread:
+            self.thread.join()
 
  
 if __name__ == '__main__':
