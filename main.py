@@ -5,6 +5,7 @@ from PyQt5 import uic
 from threading import Thread
 import datetime
 import time
+import os
 import sys
 import cv2
 import numpy as np
@@ -70,7 +71,7 @@ class Unit():
             self.rect.adjust(speed, 0, speed, 0)
         if self.direction[3]:  # 아래
             self.rect.adjust(0, speed, 0, speed)
-
+            
 
 
 class MyWindow(QMainWindow, gui):
@@ -89,6 +90,9 @@ class MyWindow(QMainWindow, gui):
         self.boundary = self.label.rect()
         self.target_color = 255
         self.pixmap_size = (800, 800)
+        
+        self.image_list = ['.jpg', '.png', '.bmp']
+        self.video_list = ['.avi', '.mp4']
 
         self.path = "MapData/maze.png"
         self.image = cv2.imread(self.path, cv2.IMREAD_GRAYSCALE)
@@ -99,6 +103,10 @@ class MyWindow(QMainWindow, gui):
         self.work_thread.update_signal.connect(self.updateImage)
         self.work_thread.update_unit.connect(self.updateUnit)
         
+        self.pixmapSet()
+        
+    
+    def pixmapSet(self):
         pixmap = QPixmap(self.label.size())
         pixmap.fill(Qt.transparent)
         self.label.setPixmap(pixmap)
@@ -144,7 +152,24 @@ class MyWindow(QMainWindow, gui):
         top = int(self.unit.rect.top())
         bottom = int(self.unit.rect.bottom())
 
-        if np.any(self.threshold_image[top:bottom, left:right] == self.target_color):
+        collision_area = self.threshold_image[top:bottom, left:right] == self.target_color
+
+        if np.any(collision_area):
+            # 충돌된 좌표들 찾기 (충돌 영역의 상대 좌표)
+            collision_coords = np.where(collision_area)
+            # 절대 좌표로 변환 (원래 이미지의 좌표)
+            collision_coords = (collision_coords[0] + top, collision_coords[1] + left)
+            y = int(np.mean(collision_coords[0]))
+            x = int(np.mean(collision_coords[1]))
+            
+            painter = QPainter(self.label.pixmap())
+            painter.setRenderHint(QPainter.Antialiasing)
+            pen = QPen(Qt.red, 30, Qt.SolidLine)
+            painter.setPen(pen)
+            painter.drawEllipse(x, y, 3, 3)
+            painter.end
+            
+            self.update()
             self.gameOver()
 
     
@@ -169,6 +194,7 @@ class MyWindow(QMainWindow, gui):
         scaled_pixmap = maze_pixmap.scaled(self.pixmap_size[0], self.pixmap_size[1], Qt.IgnoreAspectRatio)
         painter.drawPixmap(0, 0, scaled_pixmap)
         self.draw(painter)
+        painter.end()
             
 
     def mousePressEvent(self, e):
@@ -196,7 +222,7 @@ class MyWindow(QMainWindow, gui):
         if e.key() == Qt.Key_C:
             self.captureImage()
         if e.key() == Qt.Key_Z:
-            pass
+            self.readImage()
         else:
             if self.unit:
                 self.unit.keyUpdate(e.key(), True)
@@ -249,7 +275,6 @@ class MyWindow(QMainWindow, gui):
             
     def recordImage(self):
         if self.isStart:
-            print("녹화중")
             now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = now + '.avi'
             fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -260,10 +285,42 @@ class MyWindow(QMainWindow, gui):
             print("먼저 시작해주세요.")
             
             
-    def readVideo(self):
+    def readImage(self):
+        self.gameStop()
+        self.pixmapSet()
         
+        gallery, _ = QFileDialog.getOpenFileName(self, "Gallery", "../", "**.*")
         
-        
+        if gallery:
+            ext = os.path.split(gallery)[-1].lower()
+            
+            if ext in self.image_list:
+                image = cv2.imread(gallery)
+                if image == None:
+                    print("이미지를 불러올 수 없습니다.")
+                    return
+                
+                # 이미지를 RGB로 변환
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                
+                # 이미지의 높이, 너비, 채널 수를 가져오기
+                h, w, c = image.shape
+                
+                # QImage로 변환
+                setImage = QImage(image.data, w, h, w*c, QImage.Format_RGB888)
+                
+                # QImage를 QPixmap으로 변환하고 QLabel에 설정
+                self.target_pixmap = QPixmap.fromImage(setImage)
+                
+                # QLabel의 크기에 맞게 이미지 크기 조정 (비율 유지)
+                self.target_pixmap = self.target_pixmap.scaled(self.label.size(), Qt.KeepAspectRatio)
+                
+                # QLabel에 Pixmap 설정
+                self.label.setPixmap(self.target_pixmap)
+
+
+
+
 
 
 if __name__ == '__main__':
