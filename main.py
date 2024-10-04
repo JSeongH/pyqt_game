@@ -1,9 +1,9 @@
-from PyQt5.QtGui import QKeyEvent
-from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
+from PyQt5.QtWidgets import *
 from PyQt5.QtCore import  *
 from PyQt5 import uic
 from threading import Thread
+import datetime
 import time
 import sys
 import cv2
@@ -13,6 +13,33 @@ import numpy as np
  
 
 gui = uic.loadUiType("test.ui")[0]
+
+
+
+class Working(QThread):
+    update_signal = pyqtSignal()
+    update_unit = pyqtSignal(QRectF)
+    
+    def __init__(self, parent=None):
+        super().__init__()
+        self.parent = parent
+        self.running = True
+        
+        
+    def run(self):
+        while self.running:
+            self.update_unit.emit(self.parent.unit.rect)
+            self.update_signal.emit()
+            time.sleep(0.01)
+            
+            
+    def resume(self):
+        self.running = True
+        
+    
+    def pause(self):
+        self.running = False
+
 
 
 class Unit():
@@ -52,6 +79,7 @@ class MyWindow(QMainWindow, gui):
         self.setupUi(self)
         self.isStart = False
         self.unit = None
+        self.writer = None
 
         self.unit_color = QColor(0, 255, 0)
         self.unit_size = 20
@@ -60,11 +88,16 @@ class MyWindow(QMainWindow, gui):
 
         self.boundary = self.label.rect()
         self.target_color = 255
+        self.pixmap_size = (800, 800)
 
-        self.path = "MapData\maze.png"
+        self.path = "MapData/maze.png"
         self.image = cv2.imread(self.path, cv2.IMREAD_GRAYSCALE)
         _, self.threshold_image = cv2.threshold(self.image, 127, 255, cv2.THRESH_BINARY_INV)
-        self.threshold_image = cv2.resize(self.threshold_image, (800, 800))
+        self.threshold_image = cv2.resize(self.threshold_image, self.pixmap_size)
+        
+        self.work_thread = Working(self)
+        self.work_thread.update_signal.connect(self.updateImage)
+        self.work_thread.update_unit.connect(self.updateUnit)
         
         pixmap = QPixmap(self.label.size())
         pixmap.fill(Qt.transparent)
@@ -75,25 +108,29 @@ class MyWindow(QMainWindow, gui):
     def gameStart(self):
         if self.unit:
             self.isStart = True
-
-            self.thread = Thread(target=self.threadFunc)
-            self.thread.start()
+            if self.work_thread.running == False:
+                self.work_thread.resume()
+            self.work_thread.start()
+            self.recordImage()
         else:
             QMessageBox.information(self, '유닛이 없습니다.', '화면을 클릭해 유닛을 생성해주세요.', QMessageBox.Yes)
 
     
     def gameStop(self):
         self.isStart = False
+        self.work_thread.pause()
         
     
     def gameOver(self):
-        self.gameStop()
-        reply = QMessageBox.question(self, 'Game Over', '다시하기(Yes) | 게임종료(No)', 
-                             QMessageBox.Yes | QMessageBox.No)
+        self.isStart = False
+        self.work_thread.pause()
+        reply = QMessageBox.question(self, 'Game Over', '다시하기(Yes) | 게임종료(No)', QMessageBox.Yes | QMessageBox.No)
 
         if reply == QMessageBox.Yes:
             self.gameReset()
+            self.gameStart()
         else:
+            self.gameStop()
             QApplication.quit()
 
     
@@ -107,7 +144,6 @@ class MyWindow(QMainWindow, gui):
         top = int(self.unit.rect.top())
         bottom = int(self.unit.rect.bottom())
 
-        # 슬라이싱을 사용하여 색상 감지
         if np.any(self.threshold_image[top:bottom, left:right] == self.target_color):
             self.gameOver()
 
@@ -117,7 +153,7 @@ class MyWindow(QMainWindow, gui):
             coord = QPoint(x, y)
             sizes = QSizeF(self.unit_size, self.unit_size)
             self.unit = Unit(QRectF(coord, sizes),self.unit_color)
-            self.update()
+            self.updateUnit()
 
 
     def draw(self, painter):
@@ -130,7 +166,7 @@ class MyWindow(QMainWindow, gui):
     def paintEvent(self, e):
         painter = QPainter(self.target_pixmap)
         maze_pixmap = QPixmap(self.path)
-        scaled_pixmap = maze_pixmap.scaled(800, 800, Qt.IgnoreAspectRatio)
+        scaled_pixmap = maze_pixmap.scaled(self.pixmap_size[0], self.pixmap_size[1], Qt.IgnoreAspectRatio)
         painter.drawPixmap(0, 0, scaled_pixmap)
         self.draw(painter)
             
@@ -157,6 +193,10 @@ class MyWindow(QMainWindow, gui):
             self.gameStop()
         if e.key() == Qt.Key_R:
             self.gameReset()
+        if e.key() == Qt.Key_C:
+            self.captureImage()
+        if e.key() == Qt.Key_Z:
+            pass
         else:
             if self.unit:
                 self.unit.keyUpdate(e.key(), True)
@@ -169,20 +209,63 @@ class MyWindow(QMainWindow, gui):
 
     def gameSnapshot(self):
         self.drawRectAtCoordinates(self.start_x, self.start_y)
-            
-
-    def threadFunc(self):
-        while self.isStart:
-            self.unit.moveUpdate()
-            self.detectWall()
-            self.update()
-
-            time.sleep(0.01)
         
-        if self.thread:
-            self.thread.join()
+    
+    def updateUnit(self):
+        self.unit.moveUpdate()
+        self.detectWall()
+        self.update()
+        
+        
+    def updateImage(self):
+        self.image = self.pixmapToArray(self.target_pixmap)
+        if self.writer is not None:
+            self.writer.write(self.image)
+        
+        
+    def pixmapToArray(self, pixmap):
+        """QPixmap을 numpy 배열로 변환"""
+        image = pixmap.toImage()
+        image = image.convertToFormat(QImage.Format.Format_RGB32)
+        width = image.width()
+        height = image.height()
 
- 
+        ptr = image.bits()
+        ptr.setsize(image.byteCount())
+        arr = np.array(ptr).reshape(height, width, 4)  # RGBA로 변환
+        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)  # OpenCV 형식 BGR로 변환
+        
+    
+    def captureImage(self):
+        if self.isStart:
+            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = now + '.png'
+            file_path = '../' + filename
+
+            cv2.imwrite(file_path, self.image)
+        else:
+            print("먼저 시작해주세요.")
+            
+            
+    def recordImage(self):
+        if self.isStart:
+            print("녹화중")
+            now = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = now + '.avi'
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            file_path = '../' + filename
+
+            self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, self.pixmap_size)
+        else:
+            print("먼저 시작해주세요.")
+            
+            
+    def readVideo(self):
+        
+        
+        
+
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MyWindow()
