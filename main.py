@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 
- 
+
 
 gui = uic.loadUiType("test.ui")[0]
 
@@ -102,6 +102,8 @@ class MyWindow(QMainWindow, gui):
         self.work_thread = Working(self)
         self.work_thread.update_signal.connect(self.updateImage)
         self.work_thread.update_unit.connect(self.updateUnit)
+        
+        self.timer = QTimer()
         
         self.pixmapSet()
         
@@ -213,7 +215,8 @@ class MyWindow(QMainWindow, gui):
         if e.key() == Qt.Key_Escape:
             self.gameStop()
             QApplication.quit()
-        if e.key() == Qt.Key_Q:
+        if e.key() == Qt.Key_Q and self.isStart == False:
+            print("Start")
             self.gameStart()
         if e.key() == Qt.Key_W:
             self.gameStop()
@@ -287,36 +290,40 @@ class MyWindow(QMainWindow, gui):
             
     def readImage(self):
         self.gameStop()
-        self.pixmapSet()
+        # self.pixmapSet()
         
         gallery, _ = QFileDialog.getOpenFileName(self, "Gallery", "../", "**.*")
         
         if gallery:
-            ext = os.path.split(gallery)[-1].lower()
+            self.capture = cv2.VideoCapture(gallery)
             
-            if ext in self.image_list:
-                image = cv2.imread(gallery)
-                if image == None:
-                    print("이미지를 불러올 수 없습니다.")
-                    return
+            if not self.capture.isOpened():
+                QMessageBox.warning(self, "Error", "Could not open video file.")
+                return
+
+            self.timer.timeout.connect(self.update_frame)
+            self.timer.start(33)  # 30fps
+                    
                 
-                # 이미지를 RGB로 변환
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                
-                # 이미지의 높이, 너비, 채널 수를 가져오기
-                h, w, c = image.shape
-                
-                # QImage로 변환
-                setImage = QImage(image.data, w, h, w*c, QImage.Format_RGB888)
-                
-                # QImage를 QPixmap으로 변환하고 QLabel에 설정
-                self.target_pixmap = QPixmap.fromImage(setImage)
-                
-                # QLabel의 크기에 맞게 이미지 크기 조정 (비율 유지)
-                self.target_pixmap = self.target_pixmap.scaled(self.label.size(), Qt.KeepAspectRatio)
-                
-                # QLabel에 Pixmap 설정
-                self.label.setPixmap(self.target_pixmap)
+    def update_frame(self):
+        ret, frame = self.capture.read()
+
+        if ret:
+            # BGR에서 RGB로 변환
+            rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_image.shape
+            bytes_per_line = ch * w
+            
+            # QImage 생성
+            convert_to_Qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            p = convert_to_Qt_format.scaled(800, 800, Qt.KeepAspectRatio)  # 비율 유지
+            
+            # QLabel에 QPixmap으로 설정
+            self.label.setPixmap(QPixmap.fromImage(p))
+        else:
+            # 동영상 재생이 끝났을 경우 타이머 중지
+            self.capture.release()
+
 
 
 
